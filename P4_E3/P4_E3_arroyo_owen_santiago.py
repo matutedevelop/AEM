@@ -1,7 +1,10 @@
 import marimo
 
 __generated_with = "0.23.6"
-app = marimo.App(width="medium")
+app = marimo.App(
+    width="medium",
+    layout_file="layouts/P4_E3_arroyo_owen_santiago.slides.json",
+)
 
 with app.setup:
     import marimo as mo
@@ -63,9 +66,9 @@ def _():
 @app.cell
 def _():
     data = sns.load_dataset("titanic")
-    df = data
+    df = data.copy(deep=True)
     df
-    return (df,)
+    return data, df
 
 
 @app.cell(hide_code=True)
@@ -105,7 +108,7 @@ def _(df):
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    Tenemos un dataset relativamente pequeño, 15 variables y una de ellas es en casi en su totalidad  son valores nulos por lo que en primera instancia es una variable que podriamos dropear
+    Tenemos un dataset relativamente pequeño, 15 variables y una de ellas es en casi en su totalidad  son valores nulos desde que es una variable categorica podemos imputarla como `unknown`
 
     tenemos 3 variables ademas de las guardadas como bool que tienen unicamente 2 categorias, `alive` , `sex` y `survived`. `sex` esta correcto sus labels pero de alive y surviveed deberiamos de homogenizar a un solo tipo de datos
 
@@ -116,10 +119,16 @@ def _():
 
 
 @app.function
+def input_variables(df: pd.DataFrame) -> pd.DataFrame:
+    df["deck"] = df["deck"].cat.add_categories(["unknown"]).fillna("unknown")
+    return df
+
+
+@app.function
 def fix_dtypes(df: pd.DataFrame) -> pd.DataFrame:
     return df.astype(
         {
-            "alive": bool,
+            "alive": "category",
             "survived": bool,
             "who": "category",
             "embarked": "category",
@@ -131,11 +140,6 @@ def fix_dtypes(df: pd.DataFrame) -> pd.DataFrame:
 
 
 @app.function
-def drop_columns(df: pd.DataFrame) -> pd.DataFrame:
-    return df.drop(columns=["deck", "alive"])
-
-
-@app.function
 def drop_nulls(df: pd.DataFrame) -> pd.DataFrame:
     return df.dropna(ignore_index=True)
 
@@ -143,7 +147,7 @@ def drop_nulls(df: pd.DataFrame) -> pd.DataFrame:
 @app.cell
 def _(df):
     # aplicamos los cambios
-    df_clean = df.pipe(fix_dtypes).pipe(drop_columns).pipe(drop_nulls)
+    df_clean = df.pipe(input_variables).pipe(fix_dtypes).pipe(drop_nulls)
     df_clean
     return (df_clean,)
 
@@ -164,12 +168,12 @@ def _(df_clean):
     )
     FEATURES = NUM_FEATURES + CAT_FEATURES
 
-    x_train, x_test, y_train, y_test = train_test_split(
+    _x_train, _, _y_train, _ = train_test_split(
         df_clean[FEATURES], df_clean[[TARGET_CAT, TARGET_NUM]], random_state=SEED
     )
-    df_train = pd.concat([x_train, y_train], axis=1)
+    df_train = pd.concat([_x_train, _y_train], axis=1)
     df_train
-    return CAT_FEATURES, NUM_FEATURES, TARGET_CAT, TARGET_NUM, df_train
+    return CAT_FEATURES, NUM_FEATURES, SEED, TARGET_CAT, TARGET_NUM, df_train
 
 
 @app.cell(hide_code=True)
@@ -235,7 +239,7 @@ def _(NUM_FEATURES, TARGET_CAT, df_train):
 @app.cell
 def _(NUM_FEATURES, TARGET_NUM, df_train):
     alt.Chart(df_train[NUM_FEATURES + [TARGET_NUM]]).mark_circle(
-        opacity=0.7
+        opacity=0.7,
     ).encode(
         alt.X(alt.repeat("column"), type="quantitative"),
         alt.Y(f"{TARGET_NUM}:Q"),
@@ -334,11 +338,83 @@ def _(CAT_FEATURES, TARGET_CAT, TARGET_NUM, df_train):
     return
 
 
+@app.cell
+def _(TARGET_CAT, df_train):
+    _df = df_train[TARGET_CAT].value_counts(normalize=True).reset_index()
+    alt.Chart(_df).mark_bar().encode(
+        x="survived",
+        y="proportion"
+    )
+    return
+
+
+@app.cell
+def _(df_train):
+    # los graficos y los nombres de las variables como `embarked` y `embark_town` sugieren que  son colineares, vamo a checarlo
+
+    (
+        pd.crosstab(df_train["embark_town"], df_train["embarked"]),
+        pd.crosstab(df_train["adult_male"], df_train["who"]),
+        pd.crosstab(df_train["adult_male"], df_train["sex"]),
+        pd.crosstab(df_train["alive"], df_train["survived"]),
+        pd.crosstab(df_train["class"], df_train["pclass"]),
+    )
+    return
+
+
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    ## faltan las conclusiones
+    ## Hallazgos de analisis de categoricas
+
+    se habra advertido que no se analizo la relacion entre `age` y `survived` esto es una solucion deliberada dado que ambas son targets de dos modelos diferentes. No se ignora el hecho de que estas variables puedan estar considerablemente relacionadas. Es una decision del ejercicio
+
+    - la mayoria de las clases no presentan desbalances graves con excepcion de `embarked` y `embark_town`, y `deck`
+    - `embarked` y `embark_town` son colineares $\text{embarked} \iff \text{embark town}$ (dropear `embark_town`)
+    - `adult_male` implica man en `sex` $x_i \in \text{adult male} \iff x_i \in \text{sex}_{\text{man}}$ (dropear `adult_male`)
+    - `alive` y `survived` son colineares (dropear `alive`)
+    - `class` y `pclass` son colineares (dropear `pclass`)
+    - las siguientes variables tienen distribuciones sustancialmente diferentes de `survived`
+        - `sex`
+        - `alone`
+        - `who`
+        - `class`
+        - `deck`
+        - `embarked`
+    - las esperanzas condionales de `age` e.g. $\mathbb{E}[\text{age}|\text{class}]$ son diferentes en las siguientes variables, lo que sugiere que podrian ser buenos predictores de `age`
+        -  `deck`
+        -  `class`
+        -  `alone`
+        -  `who`
+        -  `sex` (mas debil)
+
+        a continuacion completamos el preprocesamiento con lo anterior
     """)
+    return
+
+
+@app.function
+def drop_columns(df: pd.DataFrame) -> pd.DataFrame:
+    return df.drop(columns=["alive", "adult_male", "embark_town", "pclass"])
+
+
+@app.cell
+def _(CAT_FEATURES, NUM_FEATURES, SEED, TARGET_CAT, TARGET_NUM, data):
+    _df = (
+        data.copy(deep=True)
+        .pipe(input_variables)
+        .pipe(fix_dtypes)
+        .pipe(drop_nulls)
+        .pipe(drop_columns)
+    )
+    _FEATURES = set(_df.columns.tolist()) - set([TARGET_CAT,TARGET_NUM])
+    FEATURES_NUM = list(_FEATURES & set(NUM_FEATURES))
+    FEATURES_CAT = list(_FEATURES & set(CAT_FEATURES))
+    FEATURES_LIST = list(_FEATURES)
+    x_train,x_test,y_train,y_test = train_test_split(_df[FEATURES_LIST],_df[[TARGET_CAT,TARGET_NUM]],random_state=SEED)
+
+    y_train_cat,y_train_num = (y_train[[TARGET_CAT]],y_train[[TARGET_NUM]])
+    y_test_cat,y_test_num = (y_test[[TARGET_CAT]],y_test[[TARGET_NUM]])
     return
 
 
