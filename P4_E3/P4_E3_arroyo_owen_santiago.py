@@ -1,25 +1,22 @@
 # /// script
-# requires-python = ">=3.12"
+# requires-python = ">=3.13"
 # dependencies = [
-#     "altair>=6.3.0",
+#     "altair==6.3.0",
 #     "marimo>=0.25.1",
-#     "matplotlib>=3.11.2",
-#     "numpy>=2.5.4",
-#     "pandas>=3.0.6",
-#     "scikit-learn>=1.9.1",
-#     "scipy>=1.18.1",
-#     "seaborn>=0.13.2",
-#     "statsmodels>=0.15.0",
+#     "matplotlib==3.11.2",
+#     "numpy==2.5.4",
+#     "pandas==3.0.6",
+#     "scikit-learn==1.9.1",
+#     "scipy==1.18.1",
+#     "seaborn==0.13.2",
+#     "statsmodels==0.15.0",
 # ]
 # ///
 
 import marimo
 
 __generated_with = "0.25.1"
-app = marimo.App(
-    width="medium",
-    layout_file="layouts/P4_E3_arroyo_owen_santiago.slides.json",
-)
+app = marimo.App(width="medium")
 
 with app.setup:
     import marimo as mo
@@ -31,6 +28,8 @@ with app.setup:
     from matplotlib import pyplot as plt
     from scipy import stats
     from sklearn.model_selection import train_test_split
+    from statsmodels.stats.outliers_influence import variance_inflation_factor
+    from sklearn.metrics import confusion_matrix, roc_auc_score, roc_curve
 
 
 @app.cell
@@ -1002,8 +1001,575 @@ def _():
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _():
+    mo.md(r"""
+    # PARTE 2: Regresión Logística
+
+    Construir un modelo de regresión logística que prediga la **Probabilidad de Supervivencia** en función de
+    múltiples predictores incluida la Edad.
+
+    **Modelo**:
+    $$
+    P(\text{Survived = 1 | X}) = \frac{1}{1 + e^{-(\beta_0 + \beta_1 \cdot \text{Age} + \cdots)}}
+    $$
+
+    **Especificación del Modelo:**
+    Los predictores son los siguientes
+    - Age: Edad (continua)
+    - Pclass: Clase del pasaje (ordinal: 1, 2, 3)
+    - Sex: Sexo (categórica: Male=1, Female=0)
+    - Fare: Tarifa (continua)
+
+    ### Preparación de los datos
+    """)
+    return
+
+
+@app.cell
+def _(SEED, data):
+    df_lr = data.copy()
+    df_lr['sex'] = df_lr['sex'].astype('category')
+    FEATURES_LR = ['sex', 'pclass', 'fare', 'age']
+
+    x_train_lr, x_test_lr, y_train_lr, y_test_lr = train_test_split(df_lr[FEATURES_LR],df_lr[['survived']],random_state=SEED)
+    return x_test_lr, x_train_lr, y_train_lr
+
+
+@app.cell
+def _(x_train_lr):
+    x_train_lr.isna().sum()
+    return
+
+
+@app.cell
+def _(x_train_lr):
+    val = x_train_lr.groupby('pclass')['age'].median()
+    val
+    return (val,)
+
+
+@app.cell
+def _(val):
+    def fill_age_na(df: pd.DataFrame) -> pd.DataFrame:
+        val_to_fill = df['pclass'].map(val)
+        df['age'] = df['age'].fillna(val_to_fill)
+        return df
+
+    def to_binary(df: pd.DataFrame) -> pd.DataFrame:
+        df['sex'] = df['sex'].map({'male':1, 'female':0})
+        return df
+
+
+    return fill_age_na, to_binary
+
+
+@app.cell
+def _(x_train_lr):
+    media_age = x_train_lr['age'].mean()
+    desv_age = x_train_lr['age'].std()
+
+    media_fare = x_train_lr['fare'].mean()
+    desv_fare = x_train_lr['fare'].std()
+    return desv_age, desv_fare, media_age, media_fare
+
+
+@app.cell
+def _(desv_age, desv_fare, media_age, media_fare):
+    def standardize(df: pd.DataFrame) -> pd.DataFrame:
+        df['age' + '_std'] = (df['age'] - media_age) / desv_age
+        df['fare' + '_std'] = (df['fare'] - media_fare) / desv_fare
+        return df
+
+
+    return (standardize,)
+
+
+@app.cell
+def _(fill_age_na, standardize, to_binary, x_train_lr):
+    x_train_lr_process = x_train_lr.copy().pipe(fill_age_na).pipe(to_binary).pipe(drop_nulls).pipe(standardize)
+    return (x_train_lr_process,)
+
+
+@app.cell
+def _(desv_age, desv_fare, media_age, media_fare, x_train_lr_process):
+    with mo.redirect_stdout():
+        media_age_std = x_train_lr_process['age_std'].mean()
+        desv_age_std = x_train_lr_process['age_std'].std()
+
+        media_fare_std = x_train_lr_process['fare_std'].mean()
+        desv_fare_std = x_train_lr_process['fare_std'].std()
+
+        print(f'La media de la variable age es {media_age:.2f} y su desviacion estandar es {desv_age:.2f}')
+        print(f'La media de la variable age ya estandarizada es {media_age_std:.2f} y su desviacion estandar es {desv_age_std:.2f}')
+
+        print(f'La media de la variable fare es {media_fare:.2f} y su desviacion estandar es {desv_fare:.2f}')
+        print(f'La media de la variable fare ya estandarizada es {media_fare_std:.2f} y su desviacion estandar es {desv_fare_std:.2f}')
+    return
+
+
+@app.cell
+def _(fill_age_na, standardize, to_binary, x_test_lr):
+    x_test_lr_process = x_test_lr.copy().pipe(fill_age_na).pipe(to_binary).pipe(drop_nulls).pipe(standardize)
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ### Ajuste del Modelo
+
+    1. Ajuste el modelo de regresión logística usando Máxima Verosimilitud
+    2. Reporte los coeficientes estimados
+    3. Presente el modelo ajustado con la ecuación logit
+    4. Interprete los coeficientes en términos de Odds Ratios:
+    """)
+    return
+
+
+@app.cell
+def _(x_train_lr_process, y_train_lr):
+    predictors= ["age_std", "pclass", "sex", "fare_std"]
+    names = ["Intercepto", "Age (std)", "Pclass", "male", "Fare (std)"]
+
+    X_lr = sm.add_constant(x_train_lr_process[predictors])
+    Y = y_train_lr['survived'].values
+
+    modelo_lr = sm.Logit(Y, X_lr).fit(disp=0)
+    modelo_lr.summary()
+    return X_lr, Y, modelo_lr, names
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    $$
+    \operatorname{logit}(\hat{p}) =  = 3.6196 - 0.5551\cdot \text{Age}_{std} - 1.1720\cdot \text{Pclass} - 2.4271\cdot \text{Male} + 0.0156\cdot \text{Fare}_{std}
+    $$
+    """)
+    return
+
+
+@app.cell
+def _(modelo_lr, names):
+    with mo.redirect_stdout():
+        # Coeficientes
+        B = modelo_lr.params.values
+        B0, B1, B2, B3, B4 = B
+
+        print("Coeficientes estimados:")
+        for _j in range(len(B)):
+            print(f"β{_j} ({names[_j]}) = {B[_j]:.4f}")
+    return (B,)
+
+
+@app.cell
+def _(B, names):
+    with mo.redirect_stdout():
+        OR = np.exp(B)
+
+        print("Odds Ratios:")
+        for _j in range(1, len(B)):
+            print(f"{names[_j]:12s} β = {B[_j]:.4f}   OR = {OR[_j]:.4f}")
+
+    return (OR,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    Interpretación de los Odds Ratios
+
+    1. Sex (male): OR = 0.0883. Ser hombre reduce los odds de sobrevivir en 91 % frente a una mujer. Las mujeres tenían unas 11 veces más odds de sobrevivir.
+    2. Clase (Pclass): OR = 0.3098. Cada nivel que baja la clase reduce los odds de sobrevivir en 69 %.
+    3. Age std: OR = 0.5740. Por cada desviación estándar de edad, los odds de sobrevivir bajan 43 %, así que los más jóvenes tenían más probabilidad de sobrevivir.
+    4. Fare std: OR = 1.0157. Su efecto es prácticamente nulo y no es significativo, porque la pclass ya explica lo que aportaría la tarifa.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ### Inferencia Estadística
+    """)
+    return
+
+
+@app.cell
+def _(B, X_lr, names):
+    with mo.redirect_stdout():
+        alpha = 0.05
+        p = 1 / (1 + np.exp(-(X_lr @ B)))
+
+        # Errores estándar
+        I_fisher = X_lr.T @ np.diag(p * (1 - p)) @ X_lr
+        cov_B = np.linalg.inv(I_fisher)
+        SE = np.sqrt(np.diag(cov_B))
+
+        # Estadísticos de Wald y p-values
+        z = B / SE
+        p_values = 2 * (1 - stats.norm.cdf(np.abs(z)))
+
+        # Intervalos de confianza al 95%
+        z_crit = stats.norm.ppf(1 - alpha / 2)     # 1.96
+        ic_inf = B - z_crit * SE
+        ic_sup = B + z_crit * SE
+
+        for _j in range(len(B)):
+            print(f"\n┌─ PARÁMETRO β{_j} ({names[_j]})")
+            print(f"│  Estimación:  β{_j} = {B[_j]:.4f}")
+            print(f"│  Error Est:   SE(β{_j}) = {SE[_j]:.4f}")
+            print(f"│  Estadístico: z = {z[_j]:.4f}")
+            print(f"│  P-value:     p = {p_values[_j]:.4f}")
+            print(f"│  IC 95% :   [{ic_inf[_j]:.4f}, {ic_sup[_j]:.4f}]") 
+            if p_values[_j] < alpha:
+                print(f"│  Conclusión: Significativo (p < 0.05). Se rechaza H0: β{_j} = 0")
+            else:
+                print(f"│  Conclusión: No significativo (p ≥ 0.05). No se rechaza H0: β{_j} = 0")
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ### Verificacion de Supuestos
+
+    Supuesto 1: No Colinealidad
+    """)
+    return
+
+
+@app.cell
+def _(X_lr, names):
+    with mo.redirect_stdout():
+        vif_data = pd.DataFrame()
+        vif_data["Variable"] = names[1:]
+        vif_data["VIF"] = [variance_inflation_factor(X_lr, i) for i in range(1, X_lr.shape[1])]
+
+        for _idx, _row in vif_data.iterrows():
+            if _row["VIF"] < 5:
+                status = "Aceptable"
+            elif _row["VIF"] < 10:
+                status = "Moderado"
+            else:
+                status = "Severo"
+            print(f"  {_row['Variable']}: VIF = {_row['VIF']:.4f}  {status}")
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    Supuesto 2: Linealidad en Logit
+    """)
+    return
+
+
+@app.cell
+def _(X_lr, Y, modelo_lr, x_train_lr_process):
+    with mo.redirect_stdout():
+        Y_pred_proba = np.asarray(modelo_lr.predict(X_lr))
+
+        _fig, _axes = plt.subplots(1, 2, figsize=(14, 5))
+        for _k, (var, etiqueta) in enumerate([("age", "Edad (años)"), ("fare", "Tarifa")]):
+            # Probabilidad predicha vs variable
+            _axes[_k].scatter(x_train_lr_process[var], Y_pred_proba, c=x_train_lr_process["sex"], cmap="coolwarm",
+                               alpha=0.5, s=15)
+            _axes[_k].set_xlabel(etiqueta)
+            _axes[_k].set_ylabel("Probabilidad predicha de supervivencia")
+            _axes[_k].set_title(f"Probabilidad predicha vs {etiqueta} (rojo = male, azul = female)")
+            _axes[_k].grid(True, alpha=0.3)
+
+        _fig.tight_layout()
+        mo.output.append(_fig)
+
+        # Hosmer-Lemeshow
+        # H0: El modelo se ajusta bien a los datos
+        # H1: El modelo NO se ajusta bien
+        deciles = pd.qcut(Y_pred_proba, q=10, duplicates='drop')
+        hl_data = pd.DataFrame({'proba': Y_pred_proba, 'real': Y, 'decil': deciles})
+
+        hosmer_results = []
+        for decil in hl_data['decil'].unique():
+            mask = hl_data['decil'] == decil
+            obs = mask.sum()
+            expected_events = hl_data[mask]['proba'].sum()
+            observed_events = hl_data[mask]['real'].sum()
+            hosmer_results.append({
+                'Decil': str(decil),
+                'N_obs': obs,
+                'Obs_Events': observed_events,
+                'Exp_Events': expected_events,
+                'Obs_NonEvents': obs - observed_events,
+                'Exp_NonEvents': obs - expected_events
+            })
+
+        hosmer_df = pd.DataFrame(hosmer_results)
+        chi2 = ((hosmer_df['Obs_Events'] - hosmer_df['Exp_Events'])**2 / hosmer_df['Exp_Events'] +
+                (hosmer_df['Obs_NonEvents'] - hosmer_df['Exp_NonEvents'])**2 / hosmer_df['Exp_NonEvents']).sum()
+        gl_hl = len(hosmer_df) - 2
+        p_value_hl = 1 - stats.chi2.cdf(chi2, gl_hl)
+
+        print(f"\n  Hosmer-Lemeshow Chi-square: {chi2:.4f}")
+        print(f"  Grados de libertad:         {gl_hl}")
+        print(f"  P-value:                    {p_value_hl:.4f}")
+        if p_value_hl > 0.05:
+            print("  Conclusión: NO rechazamos H0 -> Buen ajuste / relación lineal en logit")
+        else:
+            print("  Conclusión: Rechazamos H0 -> Posible falta de ajuste o no linealidad")
+
+    return (Y_pred_proba,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    Supuesto 3: Tamaño de Muestra y Casos Raros
+    """)
+    return
+
+
+@app.cell
+def _(B, OR, Y, names):
+    with mo.redirect_stdout():
+        # Fórmula de Hsieh, para cada predictor
+        n = len(Y)
+        alpha_h = 0.05
+        beta_h = 0.20
+        Z_alpha = stats.norm.ppf(1 - alpha_h / 2)
+        Z_beta = stats.norm.ppf(1 - beta_h)
+        P0 = Y.mean()
+
+        print(f"Fórmula de Hsieh (α = {alpha_h}, poder = {1-beta_h:.0%}):")
+        for _j in range(1, len(B)):
+            N_hsieh = (Z_alpha + Z_beta) ** 2 / (P0 * (1 - P0) * (np.log(OR[_j])) ** 2)
+            if n >= N_hsieh:
+                print(f"{names[_j]:12s} N requerido = {N_hsieh:10.2f}  -> MUESTRA SUFICIENTE ({n} ≥ {N_hsieh:.2f})")
+            else:
+                print(f"{names[_j]:12s} N requerido = {N_hsieh:10.2f}  -> MUESTRA INSUFICIENTE "
+                      f"(faltarían {N_hsieh - n:.0f} obs.)")
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ###  Métricas de Desempeño del Modelo:
+    """)
+    return
+
+
+@app.cell
+def _(Y, Y_pred_proba):
+    with mo.redirect_stdout():
+        Y_pred = (Y_pred_proba >= 0.5).astype(int)
+
+        cm = confusion_matrix(Y, Y_pred)
+        tn, fp, fn, tp = cm.ravel()
+
+        print("Matriz de confusión (punto de corte p = 0.5):")
+        print(pd.DataFrame(cm, index=["Real 0 (murió)", "Real 1 (sobrevivió)"],
+                           columns=["Pred 0", "Pred 1"]))
+
+        accuracy = (tp + tn) / (tp + tn + fp + fn)
+        recall = tp / (tp + fn)
+        especificidad = tn / (tn + fp)
+        precision = tp / (tp + fp)
+        auc = roc_auc_score(Y, Y_pred_proba) 
+
+        print(f"TP = {tp}, TN = {tn}, FP = {fp}, FN = {fn}")
+        print(f"Exactitud (Accuracy):     {accuracy:.4f}")
+        print(f"Sensibilidad (Recall):    {recall:.4f}  -> % de sobrevivientes bien predichos")
+        print(f"Especificidad:            {especificidad:.4f}  -> % de no sobrevivientes bien predichos")
+        print(f"Precisión (VPP):          {precision:.4f}  -> de los predichos como sobrevivientes, % que sí lo son")
+        print(f"AUC:                      {auc:.4f}")
+
+        if auc >= 0.9:
+            print("  Discriminación excelente")
+        elif auc >= 0.7:
+            print("  Discriminación aceptable (rango 0.7 - 0.9)")
+        else:
+            print("  Discriminación pobre")
+    return (auc,)
+
+
+@app.cell
+def _(B, Y, Y_pred_proba, auc, data, desv_age, media_age, modelo_lr):
+    fpr, tpr, umbrales = roc_curve(Y, Y_pred_proba)
+
+    _fig, _axes = plt.subplots(2, 2, figsize=(14, 10))
+
+    # 1. Curvas logísticas por sexo y clase
+    edades = np.linspace(data["age"].min(), data["age"].max(), 100)
+    edades_std = (edades - media_age) / desv_age
+    colores = {1: "green", 2: "orange", 3: "red"}
+    for clase in [1, 2, 3]:
+        for male, estilo in [(1, '-'), (0, '--')]:
+            X_curva = np.column_stack([np.ones(100), edades_std, np.full(100, clase),
+                                       np.full(100, male), np.zeros(100)])
+            proba_curva = 1 / (1 + np.exp(-(X_curva @ B)))
+            _axes[0, 0].plot(edades, proba_curva, estilo, color=colores[clase], linewidth=2,
+                            label=f"Clase {clase} - {'Male' if male else 'famale'}")
+    _axes[0, 0].axhline(y=0.5, color='gray', linestyle=':', label='Umbral (0.5)')
+    _axes[0, 0].set_xlabel('Edad (años)')
+    _axes[0, 0].set_ylabel('Probabilidad de Supervivencia')
+    _axes[0, 0].set_title('Curvas Logísticas Ajustada')
+    _axes[0, 0].set_ylim(-0.05, 1.05)
+    _axes[0, 0].legend(fontsize=8)
+    _axes[0, 0].grid(True, alpha=0.3)
+
+    # 2. Curva ROC
+    _axes[0, 1].plot(fpr, tpr, 'b-', linewidth=2, label=f'ROC Curve (AUC={auc:.4f})')
+    _axes[0, 1].plot([0, 1], [0, 1], 'r--', linewidth=1, label='Azar (AUC = 0.5)')
+    _axes[0, 1].set_xlabel('Tasa de Falsos Positivos (1 - Especificidad)')
+    _axes[0, 1].set_ylabel('Tasa de Verdaderos Positivos (Sensibilidad)')
+    _axes[0, 1].set_title('Curva ROC')
+    _axes[0, 1].legend()
+    _axes[0, 1].grid(True, alpha=0.3)
+
+    # 3. Residuos Deviance
+    residuos_deviance = modelo_lr.resid_dev
+    _axes[1, 0].scatter(Y_pred_proba, residuos_deviance, alpha=0.5, s=15)
+    _axes[1, 0].axhline(y=0, color='r', linestyle='--')
+    _axes[1, 0].set_xlabel('Probabilidades Predichas')
+    _axes[1, 0].set_ylabel('Residuos Deviance')
+    _axes[1, 0].set_title('Residuos vs Probabilidades Predichas')
+    _axes[1, 0].grid(True, alpha=0.3)
+
+    # 4. Distribución de probabilidades predichas
+    _axes[1, 1].hist(Y_pred_proba[Y == 0], bins=20, alpha=0.5, label='Real = 0 (murió)', color='red')
+    _axes[1, 1].hist(Y_pred_proba[Y == 1], bins=20, alpha=0.5, label='Real = 1 (sobrevivió)', color='blue')
+    _axes[1, 1].axvline(x=0.5, color='green', linestyle='--', label='Umbral')
+    _axes[1, 1].set_xlabel('Probabilidad Predicha de Supervivencia')
+    _axes[1, 1].set_ylabel('Frecuencia')
+    _axes[1, 1].set_title('Distribución de Probabilidades Predichas')
+    _axes[1, 1].legend()
+    _axes[1, 1].grid(True, alpha=0.3)
+
+    _fig.tight_layout()
+    _fig
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ###
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ### Conclusiones de la Regresión Logística
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    1. Predictores más significativos. El sexo es el predictor más importante, seguido de la clase y la edad . La tarifa no fue significativa.
+
+    2. Odds Ratios. Ser hombre reduce los odds de sobrevivir en 91 %  y las mujeres tenían unas 11 veces más odds de sobrevivir. Cada nivel que baja la clase reduce los odds en 69 %. Cada desviación estándar adicional de edad los reduce en 43 %. La tarifa no tiene un efecto relevante.
+
+    3. Supuestos.
+    Colinealidad: no hay problemas, con todos los VIF menores que 5. Aunque pclass puede que tenga con fare
+    Tamaño de muestra: es suficiente según la fórmula de Hsieh para Age, Pclass y Sex. Fare requeriría más de 136,000 observaciones porque su efecto es prácticamente nulo.
+
+    4. Desempeño predictivo. El modelo tiene una exactitud de 78.6 %. Su sensibilidad es de 69.3 %, su especificidad de 84.3 % y su precisión de 73.0 %. El AUC de 0.8325 indica una buena capacidad de discriminación.
+
+    5. Desbalance de clases. Hay un desbalance moderado: 62 % de los pasajeros no sobrevivió y 38 % sí. Esto se refleja en que el modelo detecta mejor a los que murieron.
+
+    6. Recomendaciones.
+    Transformar Fare con logaritmo, o eliminarla del modelo ya que se puede ver como es que tiene un distro rara, o porque tambien puede que este relacionada con pclass. Tratar Pclass con variables dummy para ver si cambia algo del modelo.
+    Mover el punto de donde de probabilidad para que hacer una clase 1 o 0.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    # PARTE 3: Análisis comparativo
+
+    ### Objetivos diferentes
+
+    | | Regresión lineal | Regresión logística |
+    |---|---|---|
+    | Qué predice | Un número continuo (edad) | Una probabilidad entre 0 y 1 (sobrevivir) |
+    | Pregunta | ¿Cuántos años tiene el pasajero? | ¿Sobrevive o no? |
+
+    Cada modelo es el apropiado para su pregunta. La edad es continua, así que le toca la lineal.
+    La supervivencia es sí/no, por eso se usa la logística.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ### Supuestos y validación
+
+    **Regresión lineal:** se violaron **linealidad** y **normalidad**
+    Sí se cumplieron homocedasticidad e independencia.
+
+    - Sin linealidad, la recta no describe bien la relación y sobreestima la edad en tarifas altas.
+
+    **Regresión logística:**
+
+    - **Colinealidad:** sin problema, todos los VIF están entre 1.05 y 1.80.
+    - **Tamaño de muestra:** suficiente para edad, clase y sexo. Solo `fare` no, porque
+      su efecto es casi cero.
+    - **Ajuste / linealidad en el logit:**  sí hay falta de ajuste en algunos rangos de probabilidad.
+
+    En resumen, la logística cumple mejor sus supuestos, pero no perfecto.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ### Interpretabilidad
+
+    | | Regresión lineal | Regresión logística |
+    |---|---|---|
+    | Coeficiente | Cambio en años por cada £1 | Cambio en los *odds* (OR = $e^{\beta}$) |
+    | Ejemplo | +£100 de tarifa → +2.6 años | Ser hombre → odds de sobrevivir ×0.09 (−91 %) |
+
+    La **lineal es más fácil de explicar** a alguien que no sabe estadística: "por cada libra, la
+    edad sube tanto". Los odds ratios cuestan más trabajo porque los *odds* no son lo mismo que la
+    probabilidad. Aun así, se pueden comunicar bien si se traducen a frases como "las mujeres tenían
+    unas 11 veces más odds de sobrevivir".
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ### Desempeño predictivo
+
+    | Regresión lineal | | Regresión logística | |
+    |---|---|---|---|
+    | $R^2$ | 0.009 | Accuracy | 78.6 % |
+    | RMSE | 14.47 años | AUC | 0.83 |
+    | MAE | 11.25 años | Sensibilidad | 69.3 % |
+    | | | Especificidad | 84.3 % |
+
+    - **Lineal:** explica menos del 1 % de la edad. Predice casi igual que decir "todos tienen
+      29.7 años", así que en la práctica no sirve.
+    - **Logística:** acierta casi 4 de cada 5 casos y con AUC de 0.83 separa bien a quienes
+      sobrevivieron de quienes no.
+
+    **En el contexto del Titanic, la logística es mucho más útil.** La pregunta importante del
+    caso es quién sobrevivió y por qué, y el modelo lo responde con claridad: sexo, clase y edad
+    fueron decisivos. La lineal no aporta casi nada porque la tarifa no
+    dice mucho de la edad de una persona.
+    """)
     return
 
 
