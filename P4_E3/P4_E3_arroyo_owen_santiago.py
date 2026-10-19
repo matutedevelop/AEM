@@ -12,7 +12,7 @@ with app.setup:
     import pandas as pd
     import altair as alt
     import numpy as np
-    import statsmodels as sm
+    import statsmodels.api as sm
     from matplotlib import pyplot as plt
     from scipy import stats
     from sklearn.model_selection import train_test_split
@@ -415,6 +415,191 @@ def _(CAT_FEATURES, NUM_FEATURES, SEED, TARGET_CAT, TARGET_NUM, data):
 
     y_train_cat,y_train_num = (y_train[[TARGET_CAT]],y_train[[TARGET_NUM]])
     y_test_cat,y_test_num = (y_test[[TARGET_CAT]],y_test[[TARGET_NUM]])
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    # Parte 1: Regresión lineal
+
+    **Objetivo:** predecir la edad (`age`) de los pasajeros a partir de la tarifa que pagaron (`fare`):
+
+    $$\text{Age} = \beta_0 + \beta_1 \cdot \text{Fare} + \varepsilon$$
+
+    Para esta parte se trabaja con el dataset completo cargado con `sns.load_dataset("titanic")`,
+    no con la partición de entrenamiento, porque el objetivo es inferencial (pruebas de hipótesis,
+    intervalos de confianza y supuestos) y conviene usar todas las observaciones disponibles.
+
+    ## 1. Análisis exploratorio de `age` y `fare`
+
+    ### 1.1 Valores faltantes
+    """)
+    return
+
+
+@app.cell
+def _(data):
+    _faltantes = data[["age", "fare"]].isna().sum()
+    pd.DataFrame(
+        {
+            "faltantes": _faltantes,
+            "porcentaje (%)": (_faltantes / len(data) * 100).round(2),
+            "observados": data[["age", "fare"]].notna().sum(),
+        }
+    )
+    return
+
+
+@app.cell
+def _(data):
+    # Solo se conservan los pasajeros con edad registrada (fare no tiene faltantes)
+    rl_df = data[["age", "fare"]].dropna().reset_index(drop=True)
+    rl_n = len(rl_df)
+    rl_df.shape
+    return rl_df, rl_n
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ### 1.2 Estadísticos descriptivos
+    """)
+    return
+
+
+@app.cell
+def _(data):
+    _vars = data[["age", "fare"]]
+    rl_desc = pd.DataFrame(
+        {
+            "n": _vars.count(),
+            "media": _vars.mean(),
+            "mediana": _vars.median(),
+            "desv. est.": _vars.std(),
+            "mín": _vars.min(),
+            "Q1": _vars.quantile(0.25),
+            "Q3": _vars.quantile(0.75),
+            "máx": _vars.max(),
+            "asimetría": _vars.skew(),
+            "curtosis": _vars.kurt(),
+        }
+    ).round(3)
+    rl_desc
+    return (rl_desc,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ### 1.3 Gráficos exploratorios
+    """)
+    return
+
+
+@app.cell
+def _(data):
+    _fig, _axes = plt.subplots(1, 2, figsize=(12, 4.5))
+    for _ax, _col, _color in zip(_axes, ["age", "fare"], ["#7EBDC2", "#F45866"]):
+        sns.histplot(
+            data[_col].dropna(), bins=30, stat="density", kde=True,
+            color=_color, edgecolor="white", ax=_ax,
+        )
+        _ax.axvline(data[_col].mean(), color="black", ls="--", lw=1, label="media")
+        _ax.axvline(data[_col].median(), color="black", ls=":", lw=1, label="mediana")
+        _ax.set_title(f"Histograma y densidad de {_col}")
+        _ax.legend()
+    _fig.tight_layout()
+    _fig
+    return
+
+
+@app.cell
+def _(rl_df):
+    _fig, _ax = plt.subplots(figsize=(8, 5))
+    sns.scatterplot(rl_df, x="fare", y="age", alpha=0.5, color="#7EBDC2", edgecolor="black", ax=_ax)
+    _ax.set_title("Dispersión: Fare vs Age")
+    _ax.set_xlabel("Fare (libras esterlinas)")
+    _ax.set_ylabel("Age (años)")
+    _fig.tight_layout()
+    _fig
+    return
+
+
+@app.cell
+def _(data):
+    _num = data[["age", "fare", "sibsp", "parch", "pclass", "survived"]]
+    _fig, _ax = plt.subplots(figsize=(7, 5.5))
+    sns.heatmap(
+        _num.corr(), annot=True, fmt=".2f", cmap="coolwarm_r",
+        vmin=-1, vmax=1, square=True, ax=_ax,
+    )
+    _ax.set_title("Matriz de correlación de Pearson")
+    _fig.tight_layout()
+    _fig
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ### 1.4 Coeficiente de correlación de Pearson entre `age` y `fare`
+    """)
+    return
+
+
+@app.cell
+def _(rl_df):
+    rl_pearson = stats.pearsonr(rl_df["fare"], rl_df["age"])
+    _ci = rl_pearson.confidence_interval(confidence_level=0.95)
+    pd.DataFrame(
+        {
+            "r": [rl_pearson.statistic],
+            "r²": [rl_pearson.statistic**2],
+            "p-value": [rl_pearson.pvalue],
+            "IC 95% inf": [_ci.low],
+            "IC 95% sup": [_ci.high],
+        }
+    ).round(4)
+    return (rl_pearson,)
+
+
+@app.cell(hide_code=True)
+def _(data, rl_desc, rl_n, rl_pearson):
+    _a, _f = rl_desc.loc["age"], rl_desc.loc["fare"]
+    _r = rl_pearson.statistic
+    mo.md(f"""
+    ### Interpretación del análisis exploratorio
+
+    **Faltantes.** `age` tiene {data["age"].isna().sum()} valores faltantes
+    ({data["age"].isna().mean():.1%} de los {len(data)} pasajeros) y `fare` no tiene ninguno.
+    Como la tarea no pide imputar en esta parte, el modelo se ajusta con los **{rl_n} pasajeros
+    con edad registrada**, por lo que los grados de libertad serán $n-2 = {rl_n - 2}$.
+
+    **Age.** Media de {_a["media"]:.2f} años y mediana de {_a["mediana"]:.1f}, con desviación estándar
+    de {_a["desv. est."]:.2f}. Va de {_a["mín"]:.2f} (bebés) a {_a["máx"]:.0f} años y el 50% central
+    está entre {_a["Q1"]:.1f} y {_a["Q3"]:.1f}. La asimetría es leve ({_a["asimetría"]:.2f}):
+    la distribución es casi simétrica, con una pequeña cola derecha y un grupo de niños pequeños.
+
+    **Fare.** Media de £{_f["media"]:.2f} contra una mediana de £{_f["mediana"]:.2f}: la media es más del
+    doble de la mediana, señal de un sesgo positivo muy fuerte (asimetría de {_f["asimetría"]:.2f} y
+    curtosis de {_f["curtosis"]:.2f}). La mayoría pagó menos de £{_f["Q3"]:.0f}, pero hay tarifas de
+    hasta £{_f["máx"]:.2f} y {int((data["fare"] == 0).sum())} pasajeros con tarifa de cero.
+
+    **Dispersión.** El gráfico no muestra una tendencia clara: los puntos se amontonan en tarifas bajas
+    para todas las edades y los valores extremos de `fare` corresponden a pasajeros de edades muy distintas.
+
+    **Correlación de Pearson.** $r = {_r:.4f}$ (p-value = {rl_pearson.pvalue:.4f}). La relación lineal
+    entre tarifa y edad es **positiva pero muy débil**: es estadísticamente distinta de cero al 5%
+    gracias al tamaño de muestra, pero $r^2 = {_r**2:.4f}$, es decir, `fare` comparte menos del 1%
+    de su variabilidad con `age`. Desde aquí se anticipa que el modelo lineal tendrá un poder
+    predictivo muy bajo.
+
+    **Matriz de correlación.** `age` se relaciona más con `pclass` (−0.37), `sibsp` (−0.31) y `parch`
+    (−0.19) que con `fare`. A su vez, `fare` está fuertemente asociada con `pclass` (−0.55). Esto sugiere
+    que la clase del pasaje funciona como variable confusora: los pasajeros de primera clase son, en
+    promedio, mayores y pagan más, y esa es la poca relación que alcanza a capturar `fare`.
+    """)
     return
 
 
