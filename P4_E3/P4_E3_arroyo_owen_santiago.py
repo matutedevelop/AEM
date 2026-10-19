@@ -16,7 +16,10 @@
 import marimo
 
 __generated_with = "0.25.1"
-app = marimo.App(width="medium")
+app = marimo.App(
+    width="medium",
+    layout_file="layouts/P4_E3_arroyo_owen_santiago.slides.json",
+)
 
 with app.setup:
     import marimo as mo
