@@ -675,5 +675,244 @@ def _():
     return
 
 
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## 3. Inferencia estadística
+
+    Para cada coeficiente se prueba:
+
+    $$H_0: \beta_j = 0 \quad \text{vs} \quad H_1: \beta_j \neq 0$$
+
+    con el estadístico de prueba y el intervalo de confianza al 95%:
+
+    $$t = \frac{\hat\beta_j}{SE(\hat\beta_j)}, \qquad \hat\beta_j \pm t_{n-2,\,0.025} \cdot SE(\hat\beta_j)$$
+
+    Los grados de libertad son $df = n - 2 = 714 - 2 = 712$ y el valor crítico es $t_{712,\,0.025} = 1.9633$.
+    """)
+    return
+
+
+@app.cell
+def _(rl_ols):
+    rl_gl = int(rl_ols.nobs) - 2
+    _t_crit = stats.t.ppf(0.975, rl_gl)
+
+    _filas = []
+    for _nombre, _param in [("β₀ (intercepto)", "const"), ("β₁ (fare)", "fare")]:
+        _b = rl_ols.params[_param]
+        _se = rl_ols.bse[_param]
+        _t = _b / _se
+        _p = 2 * stats.t.sf(abs(_t), rl_gl)
+        _filas.append(
+            {
+                "coeficiente": _nombre,
+                "estimación": round(_b, 4),
+                "SE": round(_se, 4),
+                "t": round(_t, 4),
+                "p-value": f"{_p:.4g}",
+                "IC 95% inf": round(_b - _t_crit * _se, 4),
+                "IC 95% sup": round(_b + _t_crit * _se, 4),
+            }
+        )
+
+    pd.DataFrame(_filas).set_index("coeficiente")
+    return
+
+
+@app.cell
+def _(rl_ols):
+    rl_ols.summary()
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ### Interpretación
+
+    | Coeficiente | Estimación | SE | t | p-value | IC 95% |
+    |---|---|---|---|---|---|
+    | $\beta_0$ | 28.7842 | 0.6476 | 44.44 | $1.5 \times 10^{-207}$ | [27.51, 30.06] |
+    | $\beta_1$ | 0.0264 | 0.0102 | 2.58 | 0.0102 | [0.0063, 0.0465] |
+
+    **$\beta_0$:** con $t = 44.44$ y un p-value prácticamente cero, se rechaza $H_0$ a cualquier nivel de
+    significancia. Con 95% de confianza, la edad esperada para una tarifa de £0 está entre 27.5 y 30.1 años.
+
+    **$\beta_1$:** con $t = 2.58$ y $p = 0.0102$, se rechaza $H_0$ al 5%, pero no al 1%. Sí existe una relación
+    lineal significativa entre tarifa y edad, aunque es débil. El intervalo [0.0063, 0.0465] no incluye el
+    cero, lo que confirma el resultado, y muestra que incluso en el mejor caso el efecto es pequeño: £100 más
+    en la tarifa se asocian con, a lo mucho, 4.6 años más de edad.
+
+    El p-value de $\beta_1$ es el mismo que el de la correlación de Pearson del paso 1, porque en una regresión
+    simple las dos pruebas son equivalentes.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## 4. Verificación de supuestos
+
+    Todos los supuestos se revisan con los residuos del modelo, $e_i = y_i - \hat y_i$.
+
+    ### 4.1 Linealidad
+
+    Se grafican los residuos contra los valores predichos y se aplica la prueba RESET de Ramsey, con
+    $H_0$: la relación entre `fare` y `age` es lineal.
+    """)
+    return
+
+
+@app.cell
+def _(rl_ols):
+    rl_resid = rl_ols.resid
+    rl_fitted = rl_ols.fittedvalues
+
+    _fig, _ax = plt.subplots(figsize=(8, 5))
+    sns.regplot(
+        x=rl_fitted, y=rl_resid, lowess=True, ax=_ax,
+        scatter_kws={"alpha": 0.4, "color": "#7EBDC2", "edgecolor": "black"},
+        line_kws={"color": "#F45866"},
+    )
+    _ax.axhline(0, color="black", ls="--", lw=1)
+    _ax.set_title("Residuos vs valores predichos")
+    _ax.set_xlabel("Edad predicha")
+    _ax.set_ylabel("Residuo")
+    _fig.tight_layout()
+    _fig
+    return (rl_resid,)
+
+
+@app.cell(hide_code=True)
+def _(rl_ols):
+    from statsmodels.stats.diagnostic import linear_reset as _linear_reset
+
+    _reset = _linear_reset(rl_ols, power=3, use_f=True)
+    pd.DataFrame(
+        {"estadístico F": [float(_reset.fvalue)], "p-value": [float(_reset.pvalue)]},
+        index=["RESET de Ramsey"],
+    ).round(4)
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    En la gráfica, casi todas las predicciones están entre 29 y 31 años porque la mayoría de las tarifas son
+    bajas. La curva roja no es plana: para las tarifas más altas los residuos son negativos, es decir, el
+    modelo sobreestima la edad de esos pasajeros. También se ve un límite en la parte de abajo porque la edad
+    no puede ser negativa.
+
+    La prueba RESET da $F = 4.79$ con $p = 0.0086 < 0.05$, así que se rechaza $H_0$: **no se cumple el
+    supuesto de linealidad**. La relación entre tarifa y edad no es una recta, sobre todo por las tarifas
+    extremas.
+
+    ### 4.2 Normalidad de los errores
+
+    $H_0$: los errores siguen una distribución normal. Se revisa con el Q-Q plot y las pruebas de
+    Shapiro-Wilk y Jarque-Bera.
+    """)
+    return
+
+
+@app.cell
+def _(rl_resid):
+    _fig, _ax = plt.subplots(figsize=(6, 5))
+    sm.qqplot(rl_resid, line="s", ax=_ax, markerfacecolor="#7EBDC2", markeredgecolor="black", alpha=0.6)
+    _ax.set_title("Q-Q plot de los residuos")
+    _fig.tight_layout()
+    _fig
+    return
+
+
+@app.cell
+def _(rl_resid):
+    _sw = stats.shapiro(rl_resid)
+    _jb = stats.jarque_bera(rl_resid)
+    pd.DataFrame(
+        {
+            "estadístico": [round(_sw.statistic, 4), round(_jb.statistic, 4)],
+            "p-value": [f"{_sw.pvalue:.4g}", f"{_jb.pvalue:.4g}"],
+        },
+        index=["Shapiro-Wilk", "Jarque-Bera"],
+    )
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    En el Q-Q plot los residuos siguen la diagonal en el centro, pero se separan en las colas: la cola derecha
+    queda por encima de la línea (residuos positivos más grandes de lo esperado) y la izquierda se aplana por
+    el límite inferior de la edad.
+
+    Shapiro-Wilk da $W = 0.9838$ ($p = 4.1 \times 10^{-7}$) y Jarque-Bera da $JB = 18.01$ ($p = 0.0001$). En
+    las dos se rechaza $H_0$, así que **no se cumple la normalidad**. Aun así, la desviación es moderada
+    (asimetría de 0.38) y con $n = 714$ las pruebas $t$ y los intervalos del paso 3 siguen siendo
+    aproximadamente válidos por el teorema del límite central.
+
+    ### 4.3 Homocedasticidad
+
+    $H_0$: la varianza de los errores es constante. Se usa la gráfica de residuos vs predichos de 4.1 y la
+    prueba de Breusch-Pagan.
+    """)
+    return
+
+
+@app.cell
+def _(rl_ols, rl_resid):
+    from statsmodels.stats.diagnostic import het_breuschpagan as _het_bp
+
+    _lm, _lm_p, _f, _f_p = _het_bp(rl_resid, rl_ols.model.exog)
+    pd.DataFrame(
+        {"estadístico LM": [_lm], "p-value": [_lm_p]},
+        index=["Breusch-Pagan"],
+    ).round(4)
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    En la gráfica de 4.1 no se ve un embudo claro: la dispersión de los residuos es parecida en todo el
+    rango, aunque a la derecha hay muy pocos puntos para juzgarlo bien.
+
+    Breusch-Pagan da $LM = 1.50$ con $p = 0.2206 > 0.05$, así que no se rechaza $H_0$: **se cumple el
+    supuesto de homocedasticidad**.
+
+    ### 4.4 Independencia de los errores
+
+    Se revisa con el estadístico de Durbin-Watson (un valor cercano a 2 indica que no hay autocorrelación) y
+    con el gráfico ACF.
+    """)
+    return
+
+
+@app.cell
+def _(rl_resid):
+    from statsmodels.stats.stattools import durbin_watson as _durbin_watson
+    from statsmodels.graphics.tsaplots import plot_acf as _plot_acf
+
+    _fig, _ax = plt.subplots(figsize=(8, 4))
+    _plot_acf(rl_resid, lags=30, ax=_ax)
+    _ax.set_title(f"ACF de los residuos (Durbin-Watson = {_durbin_watson(rl_resid):.3f})")
+    _fig.tight_layout()
+    _fig
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    El estadístico de Durbin-Watson es 1.891, muy cercano a 2. En el ACF casi todos los rezagos quedan dentro
+    de la banda de confianza; solo los rezagos 8 y 25 la rebasan apenas, lo cual es esperable por azar (con 30
+    rezagos y 95% de confianza se esperan 1 o 2 fuera). **Se cumple la independencia**, lo cual tiene sentido
+    porque cada fila es un pasajero distinto y los datos no tienen un orden en el tiempo.
+    """)
+    return
+
+
 if __name__ == "__main__":
     app.run()
