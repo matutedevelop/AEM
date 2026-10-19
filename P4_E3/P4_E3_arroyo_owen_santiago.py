@@ -1,3 +1,17 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "altair>=6.3.0",
+#     "marimo>=0.25.1",
+#     "matplotlib>=3.11.2",
+#     "numpy>=2.5.4",
+#     "pandas>=3.0.6",
+#     "scikit-learn>=1.9.1",
+#     "scipy>=1.18.1",
+#     "seaborn>=0.13.2",
+#     "statsmodels>=0.15.0",
+# ]
+# ///
 import marimo
 
 __generated_with = "0.23.6"
