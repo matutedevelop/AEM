@@ -12,13 +12,11 @@
 #     "statsmodels>=0.15.0",
 # ]
 # ///
+
 import marimo
 
-__generated_with = "0.23.6"
-app = marimo.App(
-    width="medium",
-    layout_file="layouts/P4_E3_arroyo_owen_santiago.slides.json",
-)
+__generated_with = "0.25.1"
+app = marimo.App(width="medium")
 
 with app.setup:
     import marimo as mo
@@ -441,9 +439,7 @@ def _():
 
     $$\text{Age} = \beta_0 + \beta_1 \cdot \text{Fare} + \varepsilon$$
 
-    Para esta parte se trabaja con el dataset completo cargado con `sns.load_dataset("titanic")`,
-    no con la partición de entrenamiento, porque el objetivo es inferencial (pruebas de hipótesis,
-    intervalos de confianza y supuestos) y conviene usar todas las observaciones disponibles.
+    Para esta parte se trabaja con el dataset completo cargado con `sns.load_dataset("titanic")`.
 
     ## 1. Análisis exploratorio de `age` y `fare`
 
@@ -467,11 +463,10 @@ def _(data):
 
 @app.cell
 def _(data):
-    # Solo se conservan los pasajeros con edad registrada (fare no tiene faltantes)
     rl_df = data[["age", "fare"]].dropna().reset_index(drop=True)
     rl_n = len(rl_df)
     rl_df.shape
-    return rl_df, rl_n
+    return (rl_df,)
 
 
 @app.cell(hide_code=True)
@@ -500,7 +495,7 @@ def _(data):
         }
     ).round(3)
     rl_desc
-    return (rl_desc,)
+    return
 
 
 @app.cell(hide_code=True)
@@ -575,44 +570,107 @@ def _(rl_df):
             "IC 95% sup": [_ci.high],
         }
     ).round(4)
-    return (rl_pearson,)
+    return
 
 
 @app.cell(hide_code=True)
-def _(data, rl_desc, rl_n, rl_pearson):
-    _a, _f = rl_desc.loc["age"], rl_desc.loc["fare"]
-    _r = rl_pearson.statistic
-    mo.md(f"""
-    ### Interpretación del análisis exploratorio
+def _():
+    mo.md(r"""
+    ### Interpretación
 
-    **Faltantes.** `age` tiene {data["age"].isna().sum()} valores faltantes
-    ({data["age"].isna().mean():.1%} de los {len(data)} pasajeros) y `fare` no tiene ninguno.
-    Como la tarea no pide imputar en esta parte, el modelo se ajusta con los **{rl_n} pasajeros
-    con edad registrada**, por lo que los grados de libertad serán $n-2 = {rl_n - 2}$.
+    La variable `age` tiene 177 valores faltantes (19.9% de los 891 pasajeros) y `fare` no tiene ninguno,
+    por lo que el modelo se ajusta con los 714 pasajeros que sí tienen edad registrada, con $n - 2 = 712$
+    grados de libertad.
 
-    **Age.** Media de {_a["media"]:.2f} años y mediana de {_a["mediana"]:.1f}, con desviación estándar
-    de {_a["desv. est."]:.2f}. Va de {_a["mín"]:.2f} (bebés) a {_a["máx"]:.0f} años y el 50% central
-    está entre {_a["Q1"]:.1f} y {_a["Q3"]:.1f}. La asimetría es leve ({_a["asimetría"]:.2f}):
-    la distribución es casi simétrica, con una pequeña cola derecha y un grupo de niños pequeños.
+    La edad promedio es de 29.7 años con una mediana de 28, y su distribución es casi simétrica. En cambio,
+    la tarifa promedio es de £32.20 pero la mediana es de £14.45: la mayoría pagó poco y unos cuantos
+    pagaron mucho (hasta £512.33), por eso está muy sesgada a la derecha.
 
-    **Fare.** Media de £{_f["media"]:.2f} contra una mediana de £{_f["mediana"]:.2f}: la media es más del
-    doble de la mediana, señal de un sesgo positivo muy fuerte (asimetría de {_f["asimetría"]:.2f} y
-    curtosis de {_f["curtosis"]:.2f}). La mayoría pagó menos de £{_f["Q3"]:.0f}, pero hay tarifas de
-    hasta £{_f["máx"]:.2f} y {int((data["fare"] == 0).sum())} pasajeros con tarifa de cero.
+    En el diagrama de dispersión no se ve una tendencia clara entre tarifa y edad. La correlación de
+    Pearson es $r = 0.096$ ($p = 0.010$), una relación positiva pero muy débil. Aunque es significativa
+    al 5%, la tarifa casi no explica la edad ($r^2 = 0.009$), así que esperamos un modelo con poco poder
+    predictivo.
+    """)
+    return
 
-    **Dispersión.** El gráfico no muestra una tendencia clara: los puntos se amontonan en tarifas bajas
-    para todas las edades y los valores extremos de `fare` corresponden a pasajeros de edades muy distintas.
 
-    **Correlación de Pearson.** $r = {_r:.4f}$ (p-value = {rl_pearson.pvalue:.4f}). La relación lineal
-    entre tarifa y edad es **positiva pero muy débil**: es estadísticamente distinta de cero al 5%
-    gracias al tamaño de muestra, pero $r^2 = {_r**2:.4f}$, es decir, `fare` comparte menos del 1%
-    de su variabilidad con `age`. Desde aquí se anticipa que el modelo lineal tendrá un poder
-    predictivo muy bajo.
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## 2. Ajuste del modelo por Máxima Verosimilitud (MLE)
 
-    **Matriz de correlación.** `age` se relaciona más con `pclass` (−0.37), `sibsp` (−0.31) y `parch`
-    (−0.19) que con `fare`. A su vez, `fare` está fuertemente asociada con `pclass` (−0.55). Esto sugiere
-    que la clase del pasaje funciona como variable confusora: los pasajeros de primera clase son, en
-    promedio, mayores y pagan más, y esa es la poca relación que alcanza a capturar `fare`.
+    Suponiendo errores $\varepsilon_i \sim N(0, \sigma^2)$, la log-verosimilitud del modelo es:
+
+    $$\ell(\beta_0, \beta_1, \sigma^2) = -\frac{n}{2}\ln(2\pi\sigma^2) - \frac{1}{2\sigma^2}\sum_{i=1}^{n}\left(y_i - \beta_0 - \beta_1 x_i\right)^2$$
+
+    Maximizar $\ell$ respecto a $\beta_0$ y $\beta_1$ es lo mismo que minimizar la suma de cuadrados de los
+    residuos, así que los coeficientes MLE coinciden con los de OLS. Lo único que cambia es la varianza:
+    MLE usa $\hat\sigma^2 = SS_{res}/n$ y OLS usa $s^2 = SS_{res}/(n-2)$.
+    """)
+    return
+
+
+@app.cell
+def _(rl_df):
+    from scipy import optimize as _optimize
+
+    _y = rl_df["age"].to_numpy()
+    _x = rl_df["fare"].to_numpy()
+
+
+    def _neg_loglik(theta):
+        # parámetros: beta0, beta1 y log(sigma) para que sigma sea positiva
+        _b0, _b1, _log_sigma = theta
+        return -np.sum(stats.norm.logpdf(_y - _b0 - _b1 * _x, loc=0, scale=np.exp(_log_sigma)))
+
+
+    rl_mle = _optimize.minimize(
+        _neg_loglik, x0=[_y.mean(), 0.0, np.log(_y.std())], method="BFGS", options={"gtol": 1e-8}
+    )
+    rl_mle.success, rl_mle.x
+    return (rl_mle,)
+
+
+@app.cell
+def _(rl_df):
+    rl_X = sm.add_constant(rl_df["fare"])
+    rl_ols = sm.OLS(rl_df["age"], rl_X).fit()
+    rl_b0, rl_b1 = rl_ols.params["const"], rl_ols.params["fare"]
+    return rl_b0, rl_b1, rl_ols
+
+
+@app.cell
+def _(rl_b0, rl_b1, rl_mle, rl_ols):
+    pd.DataFrame(
+        {
+            "MLE (scipy)": [rl_mle.x[0], rl_mle.x[1], -rl_mle.fun],
+            "OLS (statsmodels)": [rl_b0, rl_b1, rl_ols.llf],
+        },
+        index=["β̂₀", "β̂₁", "log-verosimilitud"],
+    ).round(4)
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ### Modelo ajustado
+
+    | Parámetro | Estimación |
+    |---|---|
+    | $\hat\beta_0$ | 28.7842 |
+    | $\hat\beta_1$ | 0.0264 |
+    | $\hat\sigma^2_{MLE} = SS_{res}/n$ | 208.7789 |
+    | $s^2 = SS_{res}/(n-2)$ | 209.3653 |
+
+    $$\widehat{\text{Age}} = 28.7842 + 0.0264 \cdot \text{Fare}$$
+
+    **$\hat\beta_0 = 28.78$:** es la edad esperada de un pasajero que pagó £0. Queda cerca de la edad
+    promedio porque la pendiente es casi cero.
+
+    **$\hat\beta_1 = 0.0264$:** por cada libra adicional, la edad esperada sube 0.026 años (unos 10 días).
+    Por cada £100 serían 2.6 años. Es un efecto muy pequeño y es solo una asociación: quienes pagan más
+    suelen viajar en primera clase, donde los pasajeros son mayores.
     """)
     return
 
