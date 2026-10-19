@@ -914,5 +914,95 @@ def _():
     return
 
 
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## 5. Métricas de desempeño del modelo
+
+    $$R^2 = 1 - \frac{SS_{res}}{SS_{tot}}, \qquad R^2_{adj} = 1 - \frac{(1 - R^2)(n - 1)}{n - k - 1}$$
+
+    $$RMSE = \sqrt{\frac{SS_{res}}{n - 2}}, \qquad MAE = \frac{1}{n}\sum_{i=1}^{n} |y_i - \hat y_i|$$
+
+    con $n = 714$ y $k = 1$ predictor.
+    """)
+    return
+
+
+@app.cell
+def _(rl_ols, rl_resid):
+    _y = rl_ols.model.endog
+    _n = len(_y)
+    _k = 1
+    _ss_res = np.sum(rl_resid**2)
+    _ss_tot = np.sum((_y - _y.mean()) ** 2)
+
+    _r2 = 1 - _ss_res / _ss_tot
+    _r2_adj = 1 - (1 - _r2) * (_n - 1) / (_n - _k - 1)
+    _rmse = np.sqrt(_ss_res / (_n - 2))
+    _mae = np.mean(np.abs(rl_resid))
+
+    pd.DataFrame(
+        {"valor": [_r2, _r2_adj, _rmse, _mae]},
+        index=["R²", "R² ajustado", "RMSE (años)", "MAE (años)"],
+    ).round(4)
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    **$R^2 = 0.0092$:** el modelo explica apenas el 0.92% de la variabilidad de la edad.
+
+    **$R^2_{adj} = 0.0078$:** es menor que $R^2$ porque penaliza por el número de predictores. Con un solo
+    predictor y $n = 714$ la diferencia es muy pequeña.
+
+    **RMSE = 14.47 años:** es el error típico de predicción. Es prácticamente igual a la desviación estándar
+    de la edad (14.53), es decir, el modelo casi no mejora a simplemente predecir la edad promedio.
+
+    **MAE = 11.25 años:** en promedio, la predicción se equivoca por 11.2 años. Si siempre se predijera la
+    edad promedio, el MAE sería de 11.32, casi lo mismo.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## 6. Conclusiones de la regresión lineal
+
+    **¿Existe relación significativa entre tarifa y edad?** Sí, al 5%: $\hat\beta_1 = 0.0264$ con
+    $p = 0.0102$. Pero es una relación muy débil, ya que la tarifa explica menos del 1% de la variación de la edad.
+
+    **¿Se cumplen los supuestos?**
+
+    | Supuesto | Prueba | Resultado |
+    |---|---|---|
+    | Linealidad | RESET ($p = 0.0086$) | No se cumple |
+    | Normalidad | Shapiro-Wilk y Jarque-Bera ($p < 0.001$) | No se cumple |
+    | Homocedasticidad | Breusch-Pagan ($p = 0.2206$) | Se cumple |
+    | Independencia | Durbin-Watson = 1.891 | Se cumple |
+
+    La falta de linealidad indica que una recta no describe bien la relación, sobre todo para las tarifas
+    extremas. La falta de normalidad es moderada y, con $n = 714$, las pruebas $t$ siguen siendo
+    aproximadamente válidas, aunque los p-values deben tomarse con cautela.
+
+    **¿Qué tan confiable es para predecir?** Muy poco. Con un RMSE de 14.47 años y un MAE de 11.25 años,
+    el modelo predice casi igual que usar la edad promedio para todos. No sirve para predecir la edad de un pasajero.
+
+    **Mejoras sugeridas:**
+
+    - Transformar `fare` con logaritmo para reducir el sesgo y el peso de las tarifas extremas.
+    - Agregar predictores más relacionados con la edad, como `pclass`, `sibsp`, `parch` y `sex`.
+    - Imputar `age` en lugar de eliminar los 177 registros faltantes.
+    - Probar una regresión robusta, menos sensible a los valores extremos de `fare`.
+    """)
+    return
+
+
+@app.cell
+def _():
+    return
+
+
 if __name__ == "__main__":
     app.run()
